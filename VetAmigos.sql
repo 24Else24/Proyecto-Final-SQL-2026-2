@@ -366,3 +366,109 @@ JOIN LineaAtencion l ON l.idatencion = f.idatencion
 GROUP BY f.numfactura, f.total
 ORDER BY f.numfactura;
 GO
+--Fin de la foto inicial
+--=============================================================================
+--CONSULTA 1
+SELECT c.nombres + ' ' + c.apellidos AS cliente,
+       m.nombre                      AS mascota,
+       e.nombre                      AS especie,
+       DATEDIFF(YEAR, m.fecha_nacimiento, GETDATE())
+         - CASE WHEN DATEADD(YEAR, DATEDIFF(YEAR, m.fecha_nacimiento, GETDATE()), m.fecha_nacimiento) > CAST(GETDATE() AS DATE)
+                THEN 1 ELSE 0 END    AS edad_anios
+FROM Mascota m
+JOIN Cliente c ON c.documento = m.documento
+JOIN Especie e ON e.idespecie = m.idespecie
+ORDER BY c.apellidos, c.nombres, m.nombre;
+GO
+-- =====================================================================
+-- CONSULTA 2
+SELECT c.documento,
+       c.nombres + ' ' + c.apellidos AS cliente,
+       COUNT(f.numfactura)           AS facturas,
+       ISNULL(SUM(f.total), 0)       AS total_facturado,
+       ISNULL(SUM(p.pagado), 0)      AS total_pagado
+FROM Cliente c
+LEFT JOIN Mascota  m  ON m.documento  = c.documento
+LEFT JOIN Cita     ci ON ci.idmascota = m.idmascota
+LEFT JOIN Atencion a  ON a.idcita     = ci.idcita
+LEFT JOIN Factura  f  ON f.idatencion = a.idatencion AND f.estado <> 'A'
+LEFT JOIN (SELECT numfactura, SUM(monto) AS pagado
+           FROM Pago
+           GROUP BY numfactura) p ON p.numfactura = f.numfactura
+GROUP BY c.documento, c.nombres, c.apellidos
+ORDER BY c.documento;
+GO
+-- =====================================================================
+-- CONSULTA 3
+SELECT p.codigo, p.nombre, p.stock, p.stock_minimo, p.fecha_vence,
+       CASE WHEN p.stock < p.stock_minimo THEN 'Reponer' ELSE 'OK' END AS reposicion,
+       CASE WHEN p.fecha_vence IS NULL THEN 'Vigente'
+            WHEN p.fecha_vence < CAST(GETDATE() AS DATE) THEN 'VENCIDO'
+            WHEN p.fecha_vence <= DATEADD(DAY, 90, CAST(GETDATE() AS DATE)) THEN 'Vence pronto'
+            ELSE 'Vigente' END AS vencimiento
+FROM Producto p
+WHERE p.tipo <> 'S'
+  AND (p.stock < p.stock_minimo
+       OR p.fecha_vence <= DATEADD(DAY, 90, CAST(GETDATE() AS DATE)))
+ORDER BY p.codigo;
+GO
+-- =====================================================================
+-- CONSULTA 4
+SELECT m.idmascota, m.nombre AS mascota, c.nombres + ' ' + c.apellidos AS cliente
+FROM Mascota m
+JOIN Cliente c ON c.documento = m.documento
+WHERE NOT EXISTS (SELECT 1
+                  FROM Cita ci
+                  JOIN Atencion a ON a.idcita = ci.idcita
+                  WHERE ci.idmascota = m.idmascota)
+ORDER BY m.idmascota;
+GO
+-- =====================================================================
+-- CONSULTA 5
+WITH TotalAtencion AS (
+    SELECT a.idatencion, ci.tarjeta, SUM(l.cantidad * l.precio_unitario) AS total
+    FROM Atencion a
+    JOIN Cita ci ON ci.idcita = a.idcita
+    JOIN LineaAtencion l ON l.idatencion = a.idatencion
+    GROUP BY a.idatencion, ci.tarjeta
+)
+SELECT v.tarjeta,
+       v.nombres + ' ' + v.apellidos AS veterinario,
+       COUNT(t.idatencion)           AS atenciones,
+       ISNULL(AVG(t.total), 0)       AS valor_promedio,
+       ISNULL(MAX(t.total), 0)       AS mayor_valor
+FROM Veterinario v
+LEFT JOIN TotalAtencion t ON t.tarjeta = v.tarjeta
+GROUP BY v.tarjeta, v.nombres, v.apellidos
+ORDER BY v.tarjeta;
+GO
+-- =====================================================================
+-- CONSULTA 6
+SELECT c.documento, c.nombres + ' ' + c.apellidos AS cliente
+FROM Cliente c
+WHERE c.documento IN (SELECT m.documento
+                      FROM Mascota m
+                      JOIN Especie e ON e.idespecie = m.idespecie
+                      WHERE e.nombre = 'Canino'
+                      INTERSECT
+                      SELECT m.documento
+                      FROM Mascota m
+                      JOIN Especie e ON e.idespecie = m.idespecie
+                      WHERE e.nombre = 'Felino')
+ORDER BY c.documento;
+GO 
+-- =====================================================================
+-- CONSULTA 7
+SELECT m.nombre AS mascota,
+       p.nombre AS vacuna,
+       CAST(a.fecha_hora AS DATE) AS fecha_aplicacion,
+       DATEADD(DAY, p.periodicidad, CAST(a.fecha_hora AS DATE)) AS proxima_dosis,
+       CASE WHEN DATEADD(DAY, p.periodicidad, CAST(a.fecha_hora AS DATE)) < CAST(GETDATE() AS DATE)
+            THEN 'Vencida' ELSE 'Vigente' END AS estado
+FROM LineaAtencion l
+JOIN Producto p ON p.codigo     = l.codigo AND p.tipo = 'V'
+JOIN Atencion a ON a.idatencion = l.idatencion
+JOIN Cita ci    ON ci.idcita    = a.idcita
+JOIN Mascota m  ON m.idmascota  = ci.idmascota
+ORDER BY proxima_dosis;
+GO
