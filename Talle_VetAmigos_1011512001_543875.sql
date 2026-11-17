@@ -1,7 +1,7 @@
 /* =====================================================================
    Desarrollo de Bases de Datos 2026-2
    TALLER 20 %: Clínica veterinaria VetAmigos
-   Variante: A Agenda     D = 1     Cédulas: 1011512001, 543875
+   Variante: A Agenda     D = 1     Cédulas: 1011512001, 5438756
 
    Códigos
       Cita.estado       P programada, A atendida, C cancelada, N no asistió
@@ -274,11 +274,11 @@ INSERT INTO Producto (codigo, nombre, tipo, precio, stock, stock_minimo, conteo_
 INSERT INTO Cita (idmascota, tarjeta, fecha_hora, motivo, estado) VALUES
 (1,'V01','2026-03-05 09:00','Vacunación anual',         'A'),
 (2,'V03','2025-10-01 10:00','Vacuna triple felina',     'A'),
-(5,'V01','2026-09-15 08:00','Herida en pata delantera', 'A'),
-(3,'V02','2026-01-20 11:00','Vacuna y control',         'A'),
-(4,'V02','2026-11-18 10:00','Picazón y pérdida de pelo','P'),
+(3,'V01','2026-09-15 08:00','Herida en pata delantera', 'A'),
+(4,'V02','2026-01-20 11:00','Vacuna y control',         'A'),
+(5,'V02','2026-11-18 10:00','Picazón y pérdida de pelo','P'),
 (6,'V03','2026-10-15 09:00','Control de crecimiento',   'P'),
-(3,'V01','2026-10-20 15:00','Limpieza dental',          'C');
+(7,'V01','2026-10-20 15:00','Limpieza dental',          'C');
 
 INSERT INTO Atencion (idcita, fecha_hora, diagnostico, peso, observaciones) VALUES
 (1,'2026-03-05 09:20','Sana. Vacuna antirrábica aplicada.',         28.50,NULL),
@@ -1135,10 +1135,10 @@ END
 GO
 --roles
 
-IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'app_1011512001')
-    CREATE LOGIN app_1011512001 WITH PASSWORD = 'App#1011512001!';
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'app_1011512001_5438756')
+    CREATE LOGIN app_1011512001_5438756 WITH PASSWORD = 'App#1011512001!';
 GO
-CREATE USER app_1011512001 FOR LOGIN app_1011512001;
+CREATE USER app_1011512001_5438756 FOR LOGIN app_1011512001_5438756;
 GO
  
 CREATE ROLE rol_app;
@@ -1155,7 +1155,7 @@ GRANT SELECT  ON vw_ResumenCliente       TO rol_app;
 GRANT SELECT  ON vw_CuadreInventario     TO rol_app;
 GRANT SELECT  ON vw_AgendaDia            TO rol_app;
 GRANT SELECT  ON fn_HistoriaMascota      TO rol_app;      
-ALTER ROLE rol_app ADD MEMBER app_1011512001;
+ALTER ROLE rol_app ADD MEMBER app_1011512001_5438756;
 GO
 
 -- Rol de la variante A: agenda y cancela citas y lee la agenda; no factura ni registra nig pago.
@@ -1169,88 +1169,7 @@ CREATE USER u_recepcion WITHOUT LOGIN;
 ALTER ROLE rol_recepcion ADD MEMBER u_recepcion;
 GO
 
-/*============================================PRUEBAS=====================================*/
--- ---------- T1. Agendar cita: Coco con V01, 2026-12-01 10:00 ----------
--- Esperado: RETURN 0 y cita número 8.
-DECLARE @rc INT, @idcita INT;
-EXEC @rc = sp_AgendarCita @idmascota = 7, @tarjeta = 'V01', @fecha_hora = '2026-12-01 10:00',
-                          @motivo = 'Control general', @idcita = @idcita OUTPUT;
-SELECT @rc AS retorno, @idcita AS idcita;
-GO
- 
--- ---------- T2. Atender la cita 5 (Mia) ----------
--- Esperado: atención 5; cita 5 en estado A; línea 1 = S001 a 60000.00; peso de Mia 4.20.
-DECLARE @rc INT, @idatencion INT;
-EXEC @rc = sp_RegistrarAtencion @idcita = 5, @diagnostico = 'Dermatitis alérgica', @peso = 4.20,
-                                @idatencion = @idatencion OUTPUT;
-SELECT @rc AS retorno, @idatencion AS idatencion;
-SELECT idcita, estado FROM Cita WHERE idcita = 5;
-SELECT idatencion, numlinea, codigo, cantidad, precio_unitario FROM LineaAtencion WHERE idatencion = 5;
-SELECT nombre, peso FROM Mascota WHERE idmascota = 4;
-GO
- 
--- ---------- T3. Agregar 2 unidades de M001 a la atención 5 ----------
--- Esperado: línea 2; stock de M001 = 18; Auditoria: M001 20 -> 18.
-DECLARE @rc INT, @n INT;
-EXEC @rc = sp_AgregarItem @idatencion = 5, @codigo = 'M001', @cantidad = 2, @numlinea = @n OUTPUT;
-SELECT @rc AS retorno, @n AS numlinea;
-SELECT codigo, stock FROM Producto WHERE codigo = 'M001';
-SELECT codigo, stock_antes, stock_despues, usuario, programa FROM Auditoria ORDER BY idaud;
-GO
- 
--- ---------- T4. Agregar 1 unidad de V002 ----------
--- Esperado: línea 3; stock de V002 = 2 (queda BAJO el mínimo de 4); Auditoria: V002 3 -> 2.
-DECLARE @rc INT, @n INT;
-EXEC @rc = sp_AgregarItem @idatencion = 5, @codigo = 'V002', @cantidad = 1, @numlinea = @n OUTPUT;
-SELECT @rc AS retorno, @n AS numlinea;
-SELECT codigo, stock, stock_minimo FROM Producto WHERE codigo = 'V002';
-SELECT codigo, stock_antes, stock_despues FROM Auditoria ORDER BY idaud;
-GO
- 
--- ---------- T5. Agregar 6 unidades de M002 (hay 5) ----------
--- Esperado: RETURN 3 (no alcanza el stock; no es un error, es una regla de negocio).
--- Stock de M002 sigue en 5; sin fila nueva en LogError ni en Auditoria.
-DECLARE @rc INT, @n INT;
-EXEC @rc = sp_AgregarItem @idatencion = 5, @codigo = 'M002', @cantidad = 6, @numlinea = @n OUTPUT;
-SELECT @rc AS retorno, @n AS numlinea;
-SELECT codigo, stock FROM Producto WHERE codigo = 'M002';
-GO
- 
--- ---------- T6. Atender la cita 2 (ya atendida) ----------
--- Esperado: ERROR 50002 "Solo se pueden atender citas programadas (P)."; fila en LogError.
-BEGIN TRY
-    DECLARE @rc INT, @ida INT;
-    EXEC @rc = sp_RegistrarAtencion @idcita = 2, @diagnostico = 'Prueba', @peso = 3.90, @idatencion = @ida OUTPUT;
-    SELECT @rc AS retorno;
-END TRY
-BEGIN CATCH
-    SELECT ERROR_NUMBER() AS numero, ERROR_MESSAGE() AS mensaje;
-END CATCH
-SELECT TOP 1 idlog, numero, procedimiento, mensaje, parametros FROM LogError ORDER BY idlog DESC;
-GO
- 
--- ---------- T7. Facturar la atención 5 y registrar pagos ----------
--- Esperado: factura 5 por 116000.00 (60000 + 2 x 8000 + 40000).
-DECLARE @rc INT, @nf INT;
-EXEC @rc = sp_Facturar @idatencion = 5, @numfactura = @nf OUTPUT;
-SELECT @rc AS retorno, @nf AS numfactura;
-GO
--- Pago de 100000 con tarjeta. Esperado: RETURN 0, saldo 16000.00, factura sigue en P.
-DECLARE @rc INT, @idpago INT, @saldo DECIMAL(12,2);
-EXEC @rc = sp_RegistrarPago @numfactura = 5, @monto = 100000, @medio = 'Tarjeta',
-                            @idpago = @idpago OUTPUT, @saldo = @saldo OUTPUT;
-SELECT @rc AS retorno, @idpago AS idpago, @saldo AS saldo;
-SELECT numfactura, total, estado FROM Factura WHERE numfactura = 5;
-GO
--- Pago de 20000 (supera el saldo de 16000). Esperado: RETURN 3, saldo 16000.00 y NO se
--- registra el pago; la factura sigue en P.
-DECLARE @rc INT, @idpago INT, @saldo DECIMAL(12,2);
-EXEC @rc = sp_RegistrarPago @numfactura = 5, @monto = 20000, @medio = 'Efectivo',
-                            @idpago = @idpago OUTPUT, @saldo = @saldo OUTPUT;
-SELECT @rc AS retorno, @idpago AS idpago, @saldo AS saldo;
-SELECT numfactura, total, estado FROM Factura WHERE numfactura = 5;
-GO
- 
+--============================================PRUEBAS=====================================
 -- ---------- T8. Regla de la variante A (D = 1: máximo D + 2 = 3 citas por día) ----------
 -- Citas de V02 el 2026-12-02 a las 08:00, 09:00, 10:00... hasta que una falle.
 -- Esperado: Max (cita 9), Luna (cita 10) y Rocky (cita 11) pasan, RETURN 0 cada una.
@@ -1339,11 +1258,7 @@ END CATCH
 GO
 REVERT;
 GO
- 
--- ---------- Estado al terminar T1-T9 (anótelo; se coteja en la sustentación) ----------
--- Esperado: 11 citas, 5 atenciones, 13 líneas, 5 facturas, 5 pagos, 53 unidades en stock,
--- 3 filas en LogError (T6, T8 con 50011 y T8 con 50010), 2 filas en Auditoria (T3, T4)
--- y vw_CuadreInventario con diferencia 0 en todo.
+
 SELECT 'Cita' AS tabla, COUNT(*) AS filas FROM Cita
 UNION ALL SELECT 'Atencion', COUNT(*) FROM Atencion
 UNION ALL SELECT 'LineaAtencion', COUNT(*) FROM LineaAtencion
